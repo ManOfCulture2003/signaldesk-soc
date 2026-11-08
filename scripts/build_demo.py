@@ -23,7 +23,7 @@ html = html.replace('/static/style.css', './style.css').replace('/static/app.js'
 html = html.replace('<script src="./app.js"', '<script src="./seed.js" defer></script><script src="./demo.js" defer></script><script src="./app.js"')
 html = html.replace('● LOCAL INVESTIGATION WORKBENCH', 'INTERACTIVE DEMO · SYNTHETIC DATA')
 html = html.replace('id="detect">Run detections', 'id="detect">Replay sample results')
-html = html.replace('<main>', '<main><section class="demo-notice"><strong>Try SignalDesk — no account needed.</strong><p>This is a working investigation demo with 16 synthetic events. It does not read your device. Decisions stay in this browser tab. Nothing is sent to the project owner.</p><a href="https://github.com/ManOfCulture2003/signaldesk-soc#quick-start" target="_blank" rel="noopener">Run the real local app →</a></section>')
+html = html.replace('<main>', '<main><section class="demo-notice"><strong>Try SignalDesk — no account needed.</strong><p>This is a working investigation demo with 16 synthetic events. It does not read your device. Decisions stay in this browser tab. Nothing is sent to the project owner.</p><a href="https://github.com/ManOfCulture2003/signaldesk-soc/tree/secure-local-and-demo-nov08#quick-start" target="_blank" rel="noopener">Run the real local app →</a></section>')
 html = html.replace('id="lock" type="button">Lock workspace', 'id="lock" type="button">Reset demo')
 html = html.replace('<button id="collect-windows" type="button">Read this PC’s Security log</button>', '')
 html = html.replace('<section class="import">', '<section class="import" hidden>')
