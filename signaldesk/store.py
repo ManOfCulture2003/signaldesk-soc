@@ -10,6 +10,8 @@ from .detections import detect
 from .events import canonical, parse_payload
 
 MAX_STORED_EVENTS = 50000
+MAX_IMPORT_BYTES = 100 * 1024 * 1024
+MAX_IMPORTS = 1000
 
 
 def now():
@@ -58,6 +60,10 @@ class Store:
         sha = hashlib.sha256(payload).hexdigest()
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM imports WHERE sha256=?", (sha,)).fetchone():
+                count, size = db.execute("SELECT COUNT(*), COALESCE(SUM(length(payload)),0) FROM imports").fetchone()
+                if count >= MAX_IMPORTS or size + len(payload) > MAX_IMPORT_BYTES:
+                    raise ValueError("Import archive limit reached (1000 files or 100 MiB). Use a new investigation database.")
             db.execute("INSERT OR IGNORE INTO imports VALUES (?,?,?,?)", (sha, now(), format, payload))
             added = 0
             for event in events:
@@ -146,6 +152,8 @@ class Store:
                 raise KeyError(alert_id)
             if row[0] != version:
                 raise Conflict("Case changed; reload before saving")
+            if db.execute("SELECT COUNT(*) FROM audit WHERE alert_id=?", (alert_id,)).fetchone()[0] >= 1000:
+                raise ValueError("Case history limit reached; export this case before starting another investigation")
             db.execute("UPDATE alerts SET status=?,disposition=?,owner=?,version=version+1 WHERE id=?",
                        (status, disposition, owner.strip(), alert_id))
             db.execute("INSERT INTO audit(alert_id,at,action,body) VALUES (?,?,?,?)", (alert_id, now(), "triage",

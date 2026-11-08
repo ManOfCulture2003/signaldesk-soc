@@ -12,6 +12,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .detections import RULES
 from .events import MAX_BYTES
 from .store import Conflict, Store
+from .access import LocalAccess, BodyLimit
+from .paths import data_directory
 
 STATIC = Path(__file__).parent / "static"
 
@@ -25,18 +27,17 @@ class Triage(BaseModel):
     note: str = Field(min_length=1, max_length=4000)
 
 
-def create_app(db_path="data/signaldesk.sqlite"):
+def create_app(db_path=None, access_key=None):
     app = FastAPI(title="SignalDesk SOC", version="0.1.0", docs_url=None, redoc_url=None)
-    store = Store(db_path)
+    store = Store(db_path or data_directory() / "signaldesk.sqlite")
     token = secrets.token_urlsafe(32)
     app.state.store = store
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
 
     @app.middleware("http")
     async def local_guard(request, call_next):
         # Custom header blocks cross-origin form submissions; token is never persisted.
         if request.method not in ("GET", "HEAD", "OPTIONS"):
-            if not hmac.compare_digest(request.headers.get("X-SignalDesk-Token", ""), token):
+            if not hmac.compare_digest(request.headers.get("X-SignalDesk-Token", "").encode(), token.encode()):
                 return JSONResponse({"detail": "Missing or invalid local session token"}, status_code=403)
             origin = request.headers.get("origin")
             if origin and origin != str(request.base_url).rstrip("/"):
@@ -46,6 +47,15 @@ def create_app(db_path="data/signaldesk.sqlite"):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         return response
+
+    app.add_middleware(BodyLimit)
+    app.state.access = LocalAccess("signaldesk", STATIC, access_key)
+    app.middleware("http")(app.state.access.guard)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
+
+    @app.get("/healthz")
+    def readiness():
+        return {"status": "ok"}
 
     @app.exception_handler(ValueError)
     async def invalid(request, exc):
@@ -96,6 +106,11 @@ def create_app(db_path="data/signaldesk.sqlite"):
     @app.post("/api/detect")
     def detection():
         return store.run_detection()
+
+    @app.post("/api/collect/windows")
+    def collect_windows():
+        from .windows import collect
+        return collect(store)
 
     @app.get("/api/alerts")
     def alerts():
