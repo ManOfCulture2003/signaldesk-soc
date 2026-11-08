@@ -8,6 +8,7 @@ from signaldesk.demo import demo_payload
 @pytest.fixture
 def client(tmp_path):
     with TestClient(create_app(tmp_path/'api.sqlite'),base_url='http://localhost') as client:
+        client.post("/auth/login",json={"key":client.app.state.access.key})
         yield client
 
 

@@ -13,6 +13,9 @@ RULES = {
     "SD-005": {"title": "Security audit log cleared", "severity": "high", "technique": "T1070.001", "description": "An audit_cleared event, including Windows Security event 1102.", "triage": "Check maintenance/change authorization and preceding activity. Preserve available logs. Clearing may be legitimate; do not clear logs to test this rule."},
 }
 RULESET_VERSION = "1"
+MAX_CORRELATION_CHECKS = 1000000
+MAX_EVIDENCE_REFERENCES = 100000
+MAX_ALERTS = 2000
 
 
 def epoch(event):
@@ -25,8 +28,13 @@ def detect(events):
     buckets = defaultdict(list)
     sprays = defaultdict(list)
     alerts = []
+    references = checks = 0
 
     def emit(rule, identity, evidence):
+        nonlocal references
+        references += len(evidence)
+        if references > MAX_EVIDENCE_REFERENCES or len(alerts) >= MAX_ALERTS:
+            raise ValueError("Detection output limit reached. Use a smaller investigation database; no partial results were saved.")
         evidence = sorted(evidence, key=lambda e: (e["timestamp"], e["id"]))
         alerts.append({"id": digest(canonical([RULESET_VERSION, rule, identity])), "rule_id": rule,
                        **RULES[rule], "first_seen": evidence[0]["timestamp"], "last_seen": evidence[-1]["timestamp"],
@@ -42,6 +50,9 @@ def detect(events):
             buckets[(key, bucket)].append(event)
             sprays[(event["host"], event["src_ip"], event["synthetic"], bucket)].append(event)
         elif event["kind"] == "auth_success" and event["src_ip"] and event["user"]:
+            checks += len(failures[key])
+            if checks > MAX_CORRELATION_CHECKS:
+                raise ValueError("Detection work limit reached. Use a smaller investigation database; no partial results were saved.")
             prior = [f for f in failures[key] if 0 < when - epoch(f) <= 600]
             if len(prior) >= 5:
                 emit("SD-003", event["id"], prior + [event])

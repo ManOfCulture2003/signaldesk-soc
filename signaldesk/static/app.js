@@ -5,6 +5,7 @@ const el = (tag, text, cls) => { const n = document.createElement(tag); if(text 
 function message(text) { $('message').textContent = text; }
 async function api(path, options={}) {
   const response = await fetch(path, {...options, headers:{'X-SignalDesk-Token':token,...options.headers}});
+  if(response.status===401){location.replace('/');throw new Error('Session expired. Unlock the workspace again.');}
   const data = await response.json();
   if(!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
   return data;
@@ -74,3 +75,6 @@ $('search').addEventListener('submit',action(async()=>{offset=0;await loadEvents
 $('prev').addEventListener('click',action(async()=>{offset=Math.max(0,offset-50);await loadEvents();}));$('next').addEventListener('click',action(async()=>{offset+=50;await loadEvents();}));
 $('import-form').addEventListener('submit',action(async()=>{const file=$('file').files[0];if(!file)throw new Error('Choose an evidence file.');if(file.size>5*1024*1024)throw new Error('File exceeds 5 MiB.');const result=await api('/api/import?format='+$('format').value,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});message(`Imported ${result.inserted} events (${result.duplicates} duplicates). Run detections to analyze them.`);await refresh();}));
 action(async()=>{token=(await api('/api/session')).token;await refresh();})();
+
+$('lock').addEventListener('click',action(async()=>{await fetch('/auth/logout',{method:'POST'});location.replace('/');}));
+$('collect-windows').addEventListener('click',action(async()=>{const button=$('collect-windows');button.disabled=true;message('Reading this PC’s Windows Security log…');try{const result=await api('/api/collect/windows',{method:'POST'});message(result.message+(result.import?' Imported '+result.import.inserted+' new events.':''));await refresh();}finally{button.disabled=false;}}));

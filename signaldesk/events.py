@@ -21,13 +21,22 @@ def digest(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON fields are not allowed")
+        result[key] = value
+    return result
+
+
 def normalize(row):
     if not isinstance(row, dict) or set(row) - FIELDS:
         raise ValueError("Expected an event object containing only documented schema fields")
     result = {}
     for key in ("timestamp", "host", "source", "event_id", "kind"):
         value = row.get(key)
-        if not isinstance(value, str) or not value.strip() or len(value) > 256:
+        if not isinstance(value, str) or not value.strip() or len(value) > 256 or any(ord(c) < 32 for c in value):
             raise ValueError(f"{key} must be a nonempty string of at most 256 characters")
         result[key] = value.strip()
     try:
@@ -65,16 +74,26 @@ def windows_rows(text):
     events = [root] if root.tag == "Event" else list(root.findall("Event"))
     if root.tag not in ("Event", "Events"):
         raise ValueError("Expected Windows Event or Events XML")
+    if root.tag == "Events" and any(child.tag != "Event" for child in root):
+        raise ValueError("Events may contain only Event elements")
     mapping = {"4625": "auth_failure", "4624": "auth_success", "4688": "process_start", "1102": "audit_cleared"}
     for element in events:
         system = element.find("System")
-        if system is None:
+        if system is None or len(element.findall("System")) != 1:
             raise ValueError("Windows event has no System element")
+        for field in ("EventID", "EventRecordID", "Computer", "TimeCreated"):
+            if len(system.findall(field)) != 1:
+                raise ValueError(f"Windows event requires exactly one {field}")
+        record_id = system.findtext("EventRecordID", "")
+        if not record_id.isascii() or not record_id.isdigit():
+            raise ValueError("Windows EventRecordID must be a numeric record identifier")
         code = system.findtext("EventID")
         if code not in mapping:
             raise ValueError(f"Unsupported Windows event ID: {code}; export 4624, 4625, 4688 or 1102")
-        data = {d.get("Name"): d.text or "" for d in element.findall("EventData/Data")}
+        data = unique_object([(d.get("Name"), d.text or "") for d in element.findall("EventData/Data")])
         for d in element.findall("UserData/LogFileCleared/*"):
+            if d.tag in data:
+                raise ValueError("Duplicate Windows event fields are not allowed")
             data[d.tag] = d.text or ""
         time = system.find("TimeCreated")
         ip = data.get("IpAddress", "")
@@ -93,7 +112,7 @@ def parse_payload(payload, format):
     try:
         text = payload.decode("utf-8-sig")
         if format == "ndjson":
-            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+            rows = [json.loads(line, object_pairs_hook=unique_object) for line in text.splitlines() if line.strip()]
         elif format == "windows-xml":
             rows = list(windows_rows(text))
         else:
@@ -101,5 +120,5 @@ def parse_payload(payload, format):
         if not 1 <= len(rows) <= MAX_EVENTS:
             raise ValueError("Import must contain 1 to 10000 events")
         return [normalize(row) for row in rows]
-    except (UnicodeError, ET.ParseError, DefusedXmlException, json.JSONDecodeError) as exc:
+    except (UnicodeError, ET.ParseError, DefusedXmlException, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError(f"Invalid {format} input") from exc

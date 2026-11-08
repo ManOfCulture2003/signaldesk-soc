@@ -5,11 +5,12 @@ from pathlib import Path
 
 from .demo import demo_payload
 from .store import Store
+from .paths import data_directory
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="SignalDesk SOC: local security event investigations")
-    parser.add_argument("--db", type=Path, default=Path("data/signaldesk.sqlite"))
+    parser.add_argument("--db", type=Path, default=data_directory() / "signaldesk.sqlite")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("demo", help="Import labeled synthetic evidence and run detections")
     ingest = sub.add_parser("ingest", help="Import a local evidence file")
@@ -17,6 +18,7 @@ def main(argv=None):
     ingest.add_argument("--format", choices=["ndjson", "windows-xml"], default="ndjson")
     sub.add_parser("detect")
     sub.add_parser("stats")
+    sub.add_parser("collect-windows", help="Read this PC's recent Security events using existing OS permissions")
     export = sub.add_parser("export")
     export.add_argument("alert_id")
     export.add_argument("output", type=Path)
@@ -26,7 +28,11 @@ def main(argv=None):
     if args.command == "serve":
         import uvicorn
         from .api import create_app
-        uvicorn.run(create_app(args.db), host="127.0.0.1", port=args.port)
+        if not 1 <= args.port <= 65535:
+            parser.error("port must be between 1 and 65535")
+        app = create_app(args.db)
+        print("[SignalDesk] Local access key (keep private): " + app.state.access.key, flush=True)
+        uvicorn.run(app, host="127.0.0.1", port=args.port)
         return
     store = Store(args.db)
     try:
@@ -41,6 +47,9 @@ def main(argv=None):
             result = store.run_detection()
         elif args.command == "stats":
             result = store.stats()
+        elif args.command == "collect-windows":
+            from .windows import collect
+            result = collect(store)
         else:
             result = store.case(args.alert_id)
             # Exclusive creation avoids overwriting evidence or existing reports.
